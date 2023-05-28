@@ -1,5 +1,5 @@
 import MLEngine
-from sklearn.model_selection import GridSearchCV
+
 
 if __name__ == "__main__":
 
@@ -7,7 +7,7 @@ if __name__ == "__main__":
     kfold=[5]
     m_filters=[2]
     
-    dataset_details={'file_path':'/Users/gordonchen/Documents/MACS/URECA/URECA Codebase/URECA-FBCSP-vs-FBCNet-Architectures/FBCSP/bin/Physionet Dataset/',
+    dataset_details={'file_path':'/Users/gordonchen/Documents/MACS/URECA/Dataset/',
                 'window_details':{'tmin':0,'tmax':4.1},
                 'task_number':3,
                 'ntimes':1
