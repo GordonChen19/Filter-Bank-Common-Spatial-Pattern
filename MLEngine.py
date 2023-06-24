@@ -2,11 +2,11 @@ import numpy as np
 import scipy.signal as signal
 from scipy.signal import cheb2ord
 import FBCSP
+import CSP
 import Classifier
 import LoadData
 from sklearn.svm import SVR
 import mne
-
 
 class FilterBank:
     def __init__(self,fs):
@@ -31,7 +31,7 @@ class FilterBank:
             self.filter_coeff.update({i:{'b':b,'a':a}})
 
         return self.filter_coeff
-
+    
     def filter_data(self,eeg_data,window_details={}):
         n_trials, n_channels, n_samples = eeg_data.shape
         if window_details:
@@ -58,17 +58,54 @@ class MLEngine:
         self.m_filters = m_filters
         self.task_number=task_number
         self.subject_number=subject_number
+        
+    def channel_reduce(self,channel_variance):
+        my_data = LoadData.LoadMyData(self.file_path,self.subject_number,self.task_number) 
+        eeg_data = my_data.get_epochs()
+        
+        
+        
+        fbank = FilterBank(160)
+        fbank_coeff = fbank.get_filter_coeff()
+        filtered_data = fbank.filter_data(eeg_data.get('x_data'),self.window_details)
+        
+        print("printing shape of filtered data")
+        print(filtered_data.shape)
+        y_labels = eeg_data.get('y_labels')
 
-    def experiment(self):
+       
+        train_indices, test_indices = self.cross_validate_sequential_split(y_labels)
+        
+        for i in range(self.kfold):
+            train_idx = train_indices.get(i)
+            test_idx = test_indices.get(i)
+            
+            y_train, y_test = self.split_ydata(y_labels, train_idx, test_idx)
+            x_train_fb, x_test_fb = self.split_xdata(filtered_data, train_idx, test_idx)
+
+
+            fbcsp = FBCSP.FBCSP(self.m_filters)
+
+            selected_channels,channel_variance=fbcsp.channel_reduce(x_train_fb,y_train,channel_variance)
+            trainingMean,testingMean=self.experiment(selected_channels)
+            
+            
+            return trainingMean,testingMean,channel_variance
+
+    def experiment(self,selected_channels=[i for i in range(64)]):
 
         '''Physionet Data Loading'''
         my_data = LoadData.LoadMyData(self.file_path,self.subject_number,self.task_number) 
         eeg_data = my_data.get_epochs()
         
-
+        
+        
         fbank = FilterBank(160)
         fbank_coeff = fbank.get_filter_coeff()
-        filtered_data = fbank.filter_data(eeg_data.get('x_data'),self.window_details)
+        filtered_data = fbank.filter_data(eeg_data.get('x_data')[:,selected_channels,:],self.window_details)
+        
+        print("printing shape of filtered data")
+        print(filtered_data.shape)
         y_labels = eeg_data.get('y_labels')
 
         training_accuracy = []
@@ -88,9 +125,15 @@ class MLEngine:
 
                 y_classes_unique = np.unique(y_train)
                 n_classes = len(np.unique(y_train))
+                
+                
   
                 fbcsp = FBCSP.FBCSP(self.m_filters)
+
+    
+                
                 fbcsp.fit(x_train_fb,y_train)
+                
                 y_train_predicted = np.zeros((y_train.shape[0], n_classes), dtype=np.float64)
                 y_test_predicted = np.zeros((y_test.shape[0], n_classes), dtype=np.float64)
 

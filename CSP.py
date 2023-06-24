@@ -36,3 +36,5 @@ class CSP:
         var_z = (sum_z2 - (sum_z ** 2)/z_trial_selected.shape[1]) / (z_trial_selected.shape[1] - 1)
         sum_var_z = sum(var_z)
         return np.log(var_z/sum_var_z)
+    
+    

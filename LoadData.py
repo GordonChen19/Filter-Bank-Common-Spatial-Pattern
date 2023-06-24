@@ -9,14 +9,24 @@ class LoadData:
         
     def load_raw_data_edf(self,file_to_load,subject_number):
         
-        self.raw_eeg_data.append(mne.io.read_raw_edf(self.eeg_file_path  + 'S' + str(subject_number).zfill(3)
+        raw_data=mne.io.read_raw_edf(self.eeg_file_path  + 'S' + str(subject_number).zfill(3)
                                                     + '/' + 'S' + str(subject_number).zfill(3) 
-                                                    + file_to_load))
+                                                    + file_to_load)
+        
+        print(raw_data.info['ch_names'])
+        
+        # for channel_name in channel_names:
+        #     full_channel_name = channel_name.rstrip('.')
+        #     print(full_channel_name)
+        
+        self.raw_eeg_data.append(raw_data)
         return self
     def load_baseline_edf(self,subject_number):
-        self.raw_eeg_baseline_data.append(mne.io.read_raw_edf(self.eeg_file_path+'S'+str(subject_number).zfill(3)+
+        raw_baseline= mne.io.read_raw_edf(self.eeg_file_path+'S'+str(subject_number).zfill(3)+
                                                               '/S'+ str(subject_number).zfill(3) + 
-                                                              'R01.edf')) #eyes open
+                                                              'R01.edf')
+        
+        self.raw_eeg_baseline_data.append(raw_baseline) #eyes open
 class LoadMyData(LoadData):
     '''Subclass of LoadData for loading Physionet data'''
     
@@ -43,6 +53,7 @@ class LoadMyData(LoadData):
         for i in range(len(self.raw_eeg_baseline_data)):
             raw_baseline=self.raw_eeg_baseline_data[i].get_data()
             
+            
             mean=raw_baseline.mean(axis=1) #baseline mean wrt each channel
             std=raw_baseline.std(axis=1) #baseline std wrt each channel
             
@@ -53,6 +64,7 @@ class LoadMyData(LoadData):
         y_labels=[]
         for i in range(len(self.raw_eeg_data)):
             events, event_ids = mne.events_from_annotations(self.raw_eeg_data[i])
+            print(events)
             
             del event_ids['T0']
             epoch=mne.Epochs(self.raw_eeg_data[i],events,event_ids,tmin=0,tmax=4.1,
@@ -76,13 +88,15 @@ class LoadMyData(LoadData):
             
     
         self.x_data=np.concatenate(x_datas,axis=0)
+        print("printing x_data shape")
+        print(self.x_data.shape)
         self.y_labels=np.concatenate(y_labels)
         
         
         return {'x_data':self.x_data, 'y_labels':self.y_labels,'fs':self.fs}
         
-# subject1=LoadMyData('/Users/gordonchen/Documents/MACS/URECA/URECA Codebase/URECA-FBCSP-vs-FBCNet-Architectures/FBCSP/bin/Physionet Dataset/',
-#                     1,
-#                     1)
+subject1=LoadMyData('/Users/gordonchen/Documents/MACS/URECA/Dataset/',
+                    1,
+                    1)
 
-# subject1.get_epochs()
+subject1.get_epochs()
