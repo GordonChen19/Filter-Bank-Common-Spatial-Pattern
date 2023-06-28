@@ -6,8 +6,10 @@ import CSP
 import Classifier
 import LoadData
 from sklearn.svm import SVR
+from sklearn.decomposition import PCA
 import mne
-
+from collections import defaultdict
+import matplotlib.pyplot as plt
 class FilterBank:
     def __init__(self,fs):
         self.fs = fs
@@ -59,41 +61,280 @@ class MLEngine:
         self.task_number=task_number
         self.subject_number=subject_number
         
-    def channel_reduce(self,channel_variance):
-        my_data = LoadData.LoadMyData(self.file_path,self.subject_number,self.task_number) 
-        eeg_data = my_data.get_epochs()
+    def correlation(self,signal1,signal2):
+        
+        # Normalize the signals
+        signal1_norm = (signal1 - np.mean(signal1))/np.std(signal1)
+        signal2_norm = (signal2 - np.mean(signal2))/np.std(signal2)
+        # Compute the correlation of determination between the two normalized signals
+        corr_coef = np.corrcoef(signal1_norm, signal2_norm)[0, 1]
+        # print(f'correlation coefficient is {corr_coef}')
+        return corr_coef
+    
+    def compute_matrix(self,frequency_specific_data,y_labels,draw):
+        
+        #Sperating data into individual classes -> class1_data and class2_data
+        class_filtered_data=defaultdict(list)
+        for i,label in enumerate(y_labels):
+            class_filtered_data[label].append(frequency_specific_data[i])
+            
+        class1_data=np.stack(class_filtered_data[2],axis=0)
+        class2_data=np.stack(class_filtered_data[3],axis=0)
+        class_data=[class1_data,class2_data]
         
         
+        #(21,64,657)
+        #(24,65,657)
         
-        fbank = FilterBank(160)
-        fbank_coeff = fbank.get_filter_coeff()
-        filtered_data = fbank.filter_data(eeg_data.get('x_data'),self.window_details)
-        
-        print("printing shape of filtered data")
-        print(filtered_data.shape)
-        y_labels = eeg_data.get('y_labels')
+        ###########################################################################
 
+        # Ensemble averaging involves averaging the EEG signals across trials to reduce 
+        # the effects of noise and identify common features -> channel_merged_data
+
+        channel_merged_data=[defaultdict(list),defaultdict(list)]
+
+        for classes in range(2): 
+            for channel in range(frequency_specific_data.shape[1]):
+                channel_data=class_data[classes][:,channel,:]
+                evoked=np.mean(channel_data,axis=0)
+                # print("printing evoked shape")
+                # print(evoked.shape)
+
+                channel_merged_data[classes][channel+1]=evoked
+                # time = np.arange(len(evoked))
+                # plt.plot(time, evoked)
+                # plt.xlabel('Time (ms)')
+                # plt.ylabel('EEG Amplitude')
+                # plt.title('Single EEG Signal')
+                # plt.show()
+        
+        
+        ###########################################################################
+        
+        #Computing mean of signals for each class across all channels -> channel_mean
+        
+        channel_mean=[defaultdict(list),defaultdict(list)]
+        for classes in range(2):
+            for key,items in channel_merged_data[classes].items():
+                channel_mean[classes][key].append(np.mean(items))
+                
+        
+        ###########################################################################
+        
+        #Set up NxNx2 Determination Matrix
+        
+        channel_names = ['FC5', 'FC3', 'FC1', 'FCz', 'FC2', 'FC4', 'FC6', 
+                        'C5', 'C3', 'C1', 'Cz', 'C2', 'C4', 'C6', 'CP5', 
+                        'CP3', 'CP1', 'CPz', 'CP2', 'CP4', 'CP6', 'Fp1', 
+                        'Fpz', 'Fp2', 'AF7', 'AF3', 'AFz', 'AF4', 'AF8', 
+                        'F7', 'F5', 'F3', 'F1', 'Fz', 'F2', 'F4', 'F6', 
+                        'F8', 'FT7', 'FT8', 'T7', 'T8', 'T9', 'T10', 'TP7', 
+                        'TP8', 'P7', 'P5', 'P3', 'P1', 'Pz', 'P2', 'P4', 
+                        'P6', 'P8', 'PO7', 'PO3', 'POz', 'PO4', 'PO8', 
+                        'O1', 'Oz', 'O2', 'Iz']
+
+        
+        determination_Matrix=[[[0]*64 for _ in range(64)]for _ in range(2)]
+        
+    
+        ###########################################################################
+        
+        #Compute NxNx2 Determination Matrix
+        #Find brain networks with union find
+        
+        
+        determination_threshold=0.9
+        
+        correlation_score_2D=[] #highly correlated channels from each brain network are selected
+        correlated_number=[]
+        
+        networks_by_root=defaultdict(list)
+    
+        
+        uf=[i for i in range(64)]
+        size=[1 for _ in range(64)]
+        
+        def union(a,b):
+            nonlocal uf
+            nonlocal size
+            rootA=find(a)
+            rootB=find(b)
+            if(rootA==rootB):
+                return
+            elif(size[rootA]>size[rootB]):
+                uf[rootB]=rootA
+                size[rootA]+=size[rootB]
+            else:
+                uf[rootA]=rootB
+                size[rootB]+=size[rootA]
+            
+        def find(a):
+            nonlocal uf
+            while(uf[a]!=a):
+                uf[a]=uf[uf[a]]
+                a=uf[uf[a]]
+            return a
+            
+        
+        for classes in range(2):
+            for row in range(64):
+                for column in range(row+1,64):
+                    determination_Matrix[classes][row][column]=(self.correlation(channel_merged_data[classes][row+1],
+                                                                                channel_merged_data[classes][column+1]))**2
+                    
+                    if(determination_Matrix[classes][row][column]>determination_threshold):
+                        union(row,column)
+                        
+                correlated_channels=[i for i in determination_Matrix[classes][row] if i > determination_threshold]
+                if(len(correlated_channels)==0):
+                    correlation_score_2D.append(0)
+                    correlated_number.append(0)
+                else:
+                    correlation_score_2D.append(sum(correlated_channels)/len(correlated_channels))
+                    correlated_number.append(len(correlated_channels))
+                    
+        ###########################################################################
+        # # Plot brain network graph
+        
+        import networkx as nx
+        if(draw==True):
+            G=nx.Graph()
+            #Class 1 
+            
+            for row in range(64):
+                for column in range(row,64):
+                    if(determination_Matrix[1][row][column]>determination_threshold):
+                        G.add_edge(channel_names[row],channel_names[column])
+            
+            montage = mne.channels.make_standard_montage('standard_1005')
+            coords = montage.get_positions()
+            
+            pos = {channel_names[i]: (coords['ch_pos'][channel_names[i]][0],coords['ch_pos'][channel_names[i]][1]) for i in range(len(channel_names))}
+
+            nx.draw(G,pos=pos,with_labels=True)
+            plt.show()
+                
+        
+        ###########################################################################
+        
+        correlation_score=[]
+        correlated_number_score=[]
+        for i in range(64): 
+            avg_score = (correlation_score_2D[i] + correlation_score_2D[i+64]) / 2
+            avg_number = (correlated_number[i] + correlated_number[i+64]) / 2
+            correlation_score.append(avg_score)
+            correlated_number_score.append(avg_number)
+            
+
+        
+
+        for i,root in enumerate(uf):
+            networks_by_root[root].append(i) 
+            
+        print("printing networks by root")
+        print(networks_by_root)
+            
+
+        selected_channels=[]
+        #select most informative channel from each brain network
+        for values in networks_by_root.values():
+            network_channel_scores=[correlation_score[i] for i in values]
+            mean_correlation=sum(network_channel_scores)/len(network_channel_scores)
+            selected_channels.extend([channels for channels in values if correlation_score[channels]>mean_correlation])
+        
        
-        train_indices, test_indices = self.cross_validate_sequential_split(y_labels)
+        return selected_channels
         
-        for i in range(self.kfold):
-            train_idx = train_indices.get(i)
-            test_idx = test_indices.get(i)
-            
-            y_train, y_test = self.split_ydata(y_labels, train_idx, test_idx)
-            x_train_fb, x_test_fb = self.split_xdata(filtered_data, train_idx, test_idx)
+    
 
+        
+    
+        
+        
+    def coefficient_analysis(self):
+        
+        
+        my_data=LoadData.LoadMyData(self.file_path,self.subject_number,self.task_number)
+        eeg_data=my_data.get_epochs()
 
-            fbcsp = FBCSP.FBCSP(self.m_filters)
+    
+        
+        fbank=FilterBank(160)
+        fbank_coeff=fbank.get_filter_coeff()
+        filtered_data=fbank.filter_data(eeg_data.get('x_data'),self.window_details)
+        
+        channels_by_frequency=[]
+        for i in range(filtered_data.shape[0]): #for each frequency band
+            curr_channels=self.compute_matrix(filtered_data[i],eeg_data.get('y_labels'),i==1)
+            print("selected channels are")
+            print(curr_channels)
+            channels_by_frequency.append(curr_channels)
+            
+        
+        
+        ###########################################################################
 
-            selected_channels,channel_variance=fbcsp.channel_reduce(x_train_fb,y_train,channel_variance)
-            trainingMean,testingMean=self.experiment(selected_channels)
-            
-            
-            return trainingMean,testingMean,channel_variance
+        # from collections import Counter
+        # one_d_list=[]
+        # for sublist in channels_by_frequency:
+        #     for element in sublist:
+        #         one_d_list.append(element)
+        # freq=Counter(one_d_list)
+        # most_common=freq.most_common(15)
+        # common_nums=[x[0] for x in most_common]
+        
+        ###########################################################################
+        
+        intersections = []
+        for array in channels_by_frequency:
+            intersections.append(set(array))
+
+        common_nums = set.intersection(*intersections)
+
+        # Convert the set to a list
+        common_nums = list(common_nums)
+
+        ###########################################################################
+        
+        return common_nums
+    
+    
+    def channel_reduce(self):
+        selected_channels=self.coefficient_analysis()
+        
+        manual_channels=['C3','C4','Cz'] #,'FCz','CPz'
+        
+        
+        channel_names = ['FC5', 'FC3', 'FC1', 'FCz', 'FC2', 'FC4', 'FC6', 
+                        'C5', 'C3', 'C1', 'Cz', 'C2', 'C4', 'C6', 'CP5', 
+                        'CP3', 'CP1', 'CPz', 'CP2', 'CP4', 'CP6', 'Fp1', 
+                        'Fpz', 'Fp2', 'AF7', 'AF3', 'AFz', 'AF4', 'AF8', 
+                        'F7', 'F5', 'F3', 'F1', 'Fz', 'F2', 'F4', 'F6', 
+                        'F8', 'FT7', 'FT8', 'T7', 'T8', 'T9', 'T10', 'TP7', 
+                        'TP8', 'P7', 'P5', 'P3', 'P1', 'Pz', 'P2', 'P4', 
+                        'P6', 'P8', 'PO7', 'PO3', 'POz', 'PO4', 'PO8', 
+                        'O1', 'Oz', 'O2', 'Iz']
+        
+        for i in manual_channels:
+            if(channel_names.index(i) not in selected_channels):
+                selected_channels.append(channel_names.index(i))
+                
+        trainingMean,testingMean,number_channels=self.experiment(selected_channels)
+        return trainingMean,testingMean,number_channels
 
     def experiment(self,selected_channels=[i for i in range(64)]):
-
+        
+        channel_names = ['FC5', 'FC3', 'FC1', 'FCz', 'FC2', 'FC4', 'FC6', 
+                    'C5', 'C3', 'C1', 'Cz', 'C2', 'C4', 'C6', 'CP5', 
+                    'CP3', 'CP1', 'CPz', 'CP2', 'CP4', 'CP6', 'Fp1', 
+                    'Fpz', 'Fp2', 'AF7', 'AF3', 'AFz', 'AF4', 'AF8', 
+                    'F7', 'F5', 'F3', 'F1', 'Fz', 'F2', 'F4', 'F6', 
+                    'F8', 'FT7', 'FT8', 'T7', 'T8', 'T9', 'T10', 'TP7', 
+                    'TP8', 'P7', 'P5', 'P3', 'P1', 'Pz', 'P2', 'P4', 
+                    'P6', 'P8', 'PO7', 'PO3', 'POz', 'PO4', 'PO8', 
+                    'O1', 'Oz', 'O2', 'Iz']
+        print(f'Selected {len(selected_channels)} channels specifically {[channel_names[i] for i in selected_channels]}')
+        
         '''Physionet Data Loading'''
         my_data = LoadData.LoadMyData(self.file_path,self.subject_number,self.task_number) 
         eeg_data = my_data.get_epochs()
@@ -177,7 +418,7 @@ class MLEngine:
         print(f'Mean Training Accuracy = {str(mean_training_accuracy)}\n')
         print(f'Mean Testing Accuracy = {str(mean_testing_accuracy)}')
         print('*' * 10, '\n')
-        return mean_training_accuracy,mean_testing_accuracy
+        return mean_training_accuracy,mean_testing_accuracy,len(selected_channels)
 
     def cross_validate_Ntimes_Kfold(self, y_labels, ifold=0):
         from sklearn.model_selection import StratifiedKFold

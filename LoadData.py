@@ -13,7 +13,7 @@ class LoadData:
                                                     + '/' + 'S' + str(subject_number).zfill(3) 
                                                     + file_to_load)
         
-        print(raw_data.info['ch_names'])
+        # print(raw_data.info['ch_names'])
         
         # for channel_name in channel_names:
         #     full_channel_name = channel_name.rstrip('.')
@@ -64,15 +64,15 @@ class LoadMyData(LoadData):
         y_labels=[]
         for i in range(len(self.raw_eeg_data)):
             events, event_ids = mne.events_from_annotations(self.raw_eeg_data[i])
-            print(events)
+            # print(events)
             
             del event_ids['T0']
             epoch=mne.Epochs(self.raw_eeg_data[i],events,event_ids,tmin=0,tmax=4.1,
                                          event_repeated='drop',baseline=None,
                                          preload=True,proj=False,reject_by_annotation=False)
             
+            # print(epoch.info['ch_names'])
             
-
             if(epoch.info['sfreq']!=160):
                 continue
             
@@ -88,15 +88,18 @@ class LoadMyData(LoadData):
             
     
         self.x_data=np.concatenate(x_datas,axis=0)
-        print("printing x_data shape")
-        print(self.x_data.shape)
+        # print("printing x_data shape")
+        # print(self.x_data.shape)
+        # print("printing x_data")
+        # print(self.x_data)
         self.y_labels=np.concatenate(y_labels)
         
+      
         
         return {'x_data':self.x_data, 'y_labels':self.y_labels,'fs':self.fs}
         
-subject1=LoadMyData('/Users/gordonchen/Documents/MACS/URECA/Dataset/',
-                    1,
-                    1)
+# subject1=LoadMyData('/Users/gordonchen/Documents/MACS/URECA/Dataset/',
+#                     1,
+#                     1)
 
-subject1.get_epochs()
+# subject1.get_epochs()
